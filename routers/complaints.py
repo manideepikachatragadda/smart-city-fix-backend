@@ -161,7 +161,7 @@ async def submit_complaint(
     await db.refresh(new_complaint)
 
     if file:
-        temp_dir = "static/temp_citizen"
+        temp_dir = "/tmp/static/temp_citizen"
         os.makedirs(temp_dir, exist_ok=True)
         temp_path = f"{temp_dir}/citizen_{new_complaint.id}_{file.filename}"
         
@@ -488,7 +488,7 @@ async def resolve_complaint(
     if not complaint or complaint.assigned_user_id != user.get("id"):
         raise HTTPException(status_code=403, detail="You are not assigned to this complaint.")
 
-    temp_dir = "static/temp_uploads"
+    temp_dir = "/tmp/static/temp_uploads"
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = f"{temp_dir}/temp_{complaint_id}_{file.filename}"
     
