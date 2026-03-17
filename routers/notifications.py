@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
 from typing import Annotated
 from starlette import status
 from pydantic import BaseModel
+
+# --- ASYNC SQLALCHEMY IMPORTS ---
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy import delete
 
 from models import PushSubscription, User, UserRole
 from database import get_db
@@ -11,7 +15,8 @@ from utils.notifications import send_push_notification_task
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
-db_dependency = Annotated[Session, Depends(get_db)]
+# Updated to use AsyncSession
+db_dependency = Annotated[AsyncSession, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
 # --- PYDANTIC MODELS ---
@@ -47,8 +52,10 @@ async def subscribe_to_push(
     if not user:
         raise HTTPException(status_code=401, detail='Authentication Failed')
 
-    # Check if this exact browser endpoint is already subscribed
-    exists = db.query(PushSubscription).filter(PushSubscription.endpoint == subscription.endpoint).first()
+    # 1. Async Select Query
+    stmt = select(PushSubscription).filter(PushSubscription.endpoint == subscription.endpoint)
+    result = await db.execute(stmt)
+    exists = result.scalar_one_or_none()
     
     if not exists:
         new_sub = PushSubscription(
@@ -58,7 +65,7 @@ async def subscribe_to_push(
             auth=subscription.keys.auth
         )
         db.add(new_sub)
-        db.commit()
+        await db.commit() # Await commit
         return {"message": "Successfully subscribed to push notifications."}
         
     return {"message": "Already subscribed."}
@@ -74,15 +81,16 @@ async def unsubscribe_from_push(
     if not user:
         raise HTTPException(status_code=401, detail='Authentication Failed')
 
-    # Find and delete the specific browser endpoint for this user
-    deleted_count = db.query(PushSubscription).filter(
+    # 2. Async Delete Statement
+    stmt = delete(PushSubscription).filter(
         PushSubscription.endpoint == request.endpoint,
         PushSubscription.user_id == user.get("id")
-    ).delete()
-    
-    db.commit()
+    )
+    result = await db.execute(stmt)
+    await db.commit()
 
-    if deleted_count == 0:
+    # In async SQLAlchemy, we check rowcount to see how many were deleted
+    if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Subscription not found.")
 
     return {"message": "Successfully unsubscribed from notifications."}
@@ -102,8 +110,11 @@ async def send_custom_message(
     if user.get("role") not in [UserRole.MANAGER.value, UserRole.ADMIN.value]:
         raise HTTPException(status_code=403, detail="Only Managers and Admins can send direct alerts.")
 
-    # Verify the target user exists
-    target_user = db.query(User).filter(User.id == request.target_user_id).first()
+    # 3. Async Select for Target User
+    stmt = select(User).filter(User.id == request.target_user_id)
+    result = await db.execute(stmt)
+    target_user = result.scalar_one_or_none()
+    
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
 

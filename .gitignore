@@ -8,4 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+<<<<<<< HEAD
 .env
+=======
+.env
+.DS_Store
+>>>>>>> master

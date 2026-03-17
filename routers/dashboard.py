@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import Annotated
 from starlette import status
+
+# --- ASYNC SQLALCHEMY IMPORTS ---
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy import func
 
 from models import Complaint, ComplaintStatus, DepartmentRole, UserRole
 from database import get_db
@@ -10,7 +13,8 @@ from routers.auth import get_current_user
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-db_dependency = Annotated[Session, Depends(get_db)]
+# Updated to AsyncSession
+db_dependency = Annotated[AsyncSession, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
 @router.get("/metrics", status_code=status.HTTP_200_OK)
@@ -18,32 +22,54 @@ async def get_dashboard_metrics(user: user_dependency, db: db_dependency):
     if not user:
         raise HTTPException(status_code=401, detail='Authentication Failed')
 
-    # 1. Initialize the base query
-    base_query = db.query(Complaint)
-
-    # 2. Apply department filter if the user is NOT an admin
+    # 1. Base conditions (Filters applied to EVERY query)
+    conditions = []
+    
+    # Apply department filter if the user is NOT an admin
     if user.get("role") != UserRole.ADMIN.value:
         user_dept = user.get("department")
         if not user_dept:
             raise HTTPException(status_code=403, detail="User has no assigned department.")
         
-        base_query = base_query.filter(Complaint.department_assigned == user_dept)
+        conditions.append(Complaint.department_assigned == user_dept)
 
-    # 3. Calculate metrics using the dynamic base_query
-    total = base_query.count()
-    pending = base_query.filter(Complaint.status == ComplaintStatus.PENDING).count()
-    escalated = base_query.filter(Complaint.is_escalated == True).count()
-    in_progress = base_query.filter(Complaint.status == ComplaintStatus.IN_PROGRESS).count()
-    resolved = base_query.filter(Complaint.status == ComplaintStatus.RESOLVED).count()
-    rejected = base_query.filter(Complaint.status == ComplaintStatus.REJECTED).count()
+    # Helper function to easily run async count queries
+    async def get_count(extra_conditions=None):
+        stmt = select(func.count(Complaint.id))
+        if conditions:
+            stmt = stmt.filter(*conditions)
+        if extra_conditions:
+            stmt = stmt.filter(*extra_conditions)
+            
+        result = await db.execute(stmt)
+        return result.scalar() or 0
 
-    categories = base_query.with_entities(
-        Complaint.department_assigned, func.count(Complaint.id)
-    ).group_by(Complaint.department_assigned).all()
+    # 3. Calculate metrics using the async helper
+    total = await get_count()
+    pending = await get_count([Complaint.status == ComplaintStatus.PENDING])
+    escalated = await get_count([Complaint.is_escalated == True])
+    in_progress = await get_count([Complaint.status == ComplaintStatus.IN_PROGRESS])
+    resolved = await get_count([Complaint.status == ComplaintStatus.RESOLVED])
+    rejected = await get_count([Complaint.status == ComplaintStatus.REJECTED])
+    closed = await get_count([Complaint.status == ComplaintStatus.CLOSED])
 
-    priorities = base_query.with_entities(
-        Complaint.priority_level, func.count(Complaint.id)
-    ).group_by(Complaint.priority_level).all()
+    # 4. Group by Category
+    stmt_cat = select(Complaint.department_assigned, func.count(Complaint.id))
+    if conditions:
+        stmt_cat = stmt_cat.filter(*conditions)
+    stmt_cat = stmt_cat.group_by(Complaint.department_assigned)
+    
+    res_cat = await db.execute(stmt_cat)
+    categories = res_cat.all()
+
+    # 5. Group by Priority
+    stmt_pri = select(Complaint.priority_level, func.count(Complaint.id))
+    if conditions:
+        stmt_pri = stmt_pri.filter(*conditions)
+    stmt_pri = stmt_pri.group_by(Complaint.priority_level)
+    
+    res_pri = await db.execute(stmt_pri)
+    priorities = res_pri.all()
 
     return {
         "overview": {
@@ -52,7 +78,8 @@ async def get_dashboard_metrics(user: user_dependency, db: db_dependency):
             "escalated_complaints": escalated,
             "in_progress_complaints": in_progress,
             "resolved_complaints": resolved,
-            "rejected_complaints": rejected
+            "rejected_complaints": rejected,
+            "closed_complaints": closed
         },
         "category_distribution": {cat.value: count for cat, count in categories if cat},
         "priority_distribution": {pri.value: count for pri, count in priorities if pri}

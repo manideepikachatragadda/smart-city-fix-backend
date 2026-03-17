@@ -1,20 +1,21 @@
-import os
+import random
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
-from sqlalchemy.orm import Session
-from typing import Annotated, Optional
 from starlette import status
-from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import jwt, JWTError
-from datetime import timedelta, datetime, timezone
+
+# --- ASYNC SQLALCHEMY IMPORTS ---
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from models import User, DepartmentRole, UserRole
 from database import get_db
 from config import settings
-
-import random
-from datetime import datetime, timedelta, timezone
 from utils.notifications import send_push_notification_task
 from utils.email_service import send_otp_email
 
@@ -25,6 +26,8 @@ oauth2_bearer = OAuth2PasswordBearer(tokenUrl="auth/token")
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
 
+# --- PYDANTIC MODELS ---
+
 class CreateUserRequest(BaseModel):
     username: str
     email: EmailStr
@@ -32,17 +35,15 @@ class CreateUserRequest(BaseModel):
     last_name: str
     password: str
     role: UserRole 
-    department: Optional[DepartmentRole] = None # New
+    department: Optional[DepartmentRole] = None
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
-
 class VerifyOTPRequest(BaseModel):
     email: str
     otp: str
-
 
 class ForgotPasswordRequest(BaseModel):
     email: str
@@ -52,12 +53,19 @@ class ResetPasswordRequest(BaseModel):
     otp: str
     new_password: str
 
+# --- DEPENDENCIES ---
 
+# Updated to use AsyncSession
+db_dependency = Annotated[AsyncSession, Depends(get_db)]
 
-db_dependency = Annotated[Session, Depends(get_db)]
+# --- HELPER FUNCTIONS ---
 
-def authenticate_user(username: str, password: str, db: Session):
-    user = db.query(User).filter(User.username == username).first()
+# This must be async now because it queries the DB
+async def authenticate_user(username: str, password: str, db: AsyncSession):
+    stmt = select(User).filter(User.username == username)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
     if not user or not bcrypt_context.verify(password, user.hashed_password):
         return False
     return user
@@ -74,7 +82,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
         username: str = payload.get("sub")
         user_id: int = payload.get("id")
         user_role: str = payload.get("role")
-        department: str = payload.get("department") # Extract department
+        department: str = payload.get("department")
         if username is None or user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
         return {'username': username, 'id': user_id, 'role': user_role, 'department': department}
@@ -82,10 +90,10 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+# --- ENDPOINTS ---
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def create_user(db: db_dependency, request: CreateUserRequest):
-    
-    # --- NEW: Enforce department rules! ---
     if request.role != UserRole.ADMIN and request.department is None:
         raise HTTPException(
             status_code=400, 
@@ -93,13 +101,15 @@ async def create_user(db: db_dependency, request: CreateUserRequest):
         )
 
     # 1. Check if the email already exists
-    existing_email = db.query(User).filter(User.email == request.email).first()
-    if existing_email:
+    stmt_email = select(User).filter(User.email == request.email)
+    result_email = await db.execute(stmt_email)
+    if result_email.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email is already registered.")
 
     # 2. Check if the username already exists
-    existing_username = db.query(User).filter(User.username == request.username).first()
-    if existing_username:
+    stmt_username = select(User).filter(User.username == request.username)
+    result_username = await db.execute(stmt_username)
+    if result_username.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username is already taken.")
 
     # 3. Create the user
@@ -114,15 +124,15 @@ async def create_user(db: db_dependency, request: CreateUserRequest):
         is_active=True
     )
     db.add(new_user)
-    db.commit()
+    await db.commit()
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
-    user = authenticate_user(form_data.username, form_data.password, db)
+    # Await the new async authenticate_user function
+    user = await authenticate_user(form_data.username, form_data.password, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
-    # Pass department.value if it exists, else None
     dept_val = user.department.value if user.department else None
     token = create_access_token(user.username, user.id, user.role.value, dept_val, timedelta(hours=12))
     return {'access_token': token, 'token_type': 'bearer'}
@@ -130,12 +140,13 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
 
 @router.post("/verify-otp", status_code=status.HTTP_200_OK)
 async def verify_otp(request: VerifyOTPRequest, db: db_dependency):
-    user = db.query(User).filter(User.email == request.email).first()
+    stmt = select(User).filter(User.email == request.email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     
     if not user or user.reset_otp != request.otp:
         raise HTTPException(status_code=400, detail="Invalid or incorrect OTP.")
         
-    # --- FIX: Make the database datetime offset-aware ---
     expiry = user.reset_otp_expiry
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
@@ -146,29 +157,25 @@ async def verify_otp(request: VerifyOTPRequest, db: db_dependency):
     return {"message": "OTP verified successfully. Proceed to reset password."}
 
 
-
 @router.post("/forgot-password", status_code=status.HTTP_200_OK)
 async def request_password_reset(
     request: ForgotPasswordRequest,
     db: db_dependency,
     background_tasks: BackgroundTasks
 ):
-    user = db.query(User).filter(User.email == request.email).first()
-    
+    stmt = select(User).filter(User.email == request.email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     
     if not user:
         raise HTTPException(status_code=400, detail="No account found with that email address.")
 
-    # 1. Generate 6-digit OTP
     otp_code = str(random.randint(100000, 999999))
-    
-    # 2. Set strict 5-minute expiration
     user.reset_otp = otp_code
     user.reset_otp_expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
-    db.commit()
+    
+    await db.commit()
 
-    # 3. Fire Background Notifications
-    # Push Notification (Will pop up on their screen if subscribed)
     background_tasks.add_task(
         send_push_notification_task,
         user_id=user.id,
@@ -176,7 +183,6 @@ async def request_password_reset(
         body=f"Your OTP is {otp_code}. It will expire in 5 minutes."
     )
     
-    # Email Notification (Reliable fallback)
     background_tasks.add_task(
         send_otp_email,
         to_email=user.email,
@@ -188,27 +194,27 @@ async def request_password_reset(
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 async def reset_password(request: ResetPasswordRequest, db: db_dependency):
-    user = db.query(User).filter(User.email == request.email).first()
+    stmt = select(User).filter(User.email == request.email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
     
     if not user or user.reset_otp != request.otp:
         raise HTTPException(status_code=400, detail="Invalid or incorrect OTP.")
         
-    # --- FIX: Make the database datetime offset-aware ---
     expiry = user.reset_otp_expiry
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
 
     if expiry < datetime.now(timezone.utc):
-        # Clear the expired OTP
         user.reset_otp = None
         user.reset_otp_expiry = None
-        db.commit()
+        await db.commit()
         raise HTTPException(status_code=400, detail="This OTP has expired. Please request a new one.")
 
-    # Hash the new password and clear the OTP fields
     user.hashed_password = bcrypt_context.hash(request.new_password)
     user.reset_otp = None
     user.reset_otp_expiry = None
-    db.commit()
+    
+    await db.commit()
 
     return {"message": "Password successfully reset. You can now log in."}
