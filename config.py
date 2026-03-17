@@ -29,11 +29,8 @@ class Settings(BaseSettings):
     PRIVATE_KEY: str
     SUBJECT: str
 
-<<<<<<< HEAD
-=======
     FRONTEND_URL: str
 
->>>>>>> master
     # Tells Pydantic to read from the .env file
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
