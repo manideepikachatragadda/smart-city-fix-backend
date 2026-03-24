@@ -15,7 +15,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from database import Base
-
 # ===============================
 # ENUMS (DB-safe & Postgres-ready)
 # ===============================
@@ -27,8 +26,10 @@ class UserRole(str, enum.Enum):
 class DepartmentRole(str, enum.Enum):
     WATER = "water"
     ELECTRICITY = "electricity"
-    CLEANLINESS = "cleanliness"
+    SANITATION = "sanitation"
     INFRASTRUCTURE = "infrastructure"
+    POLICE="police"
+    MEDICAL="medical"
     OTHERS = "others"
 
 class PriorityLevel(str, enum.Enum):
