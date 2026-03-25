@@ -186,7 +186,7 @@ async def submit_complaint(
 
     # Send Confirmation Email to the Citizen
     if email:
-        tracking_url = f"{settings.FRONTEND_URL}/track/{new_complaint.id}"
+        tracking_url = f"{settings.FRONTEND_URL}/track"
         
         background_tasks.add_task(
             send_citizen_receipt_email,
