@@ -43,6 +43,7 @@ class UserResponse(BaseModel):
     last_name: str
     role: UserRole
     department: DepartmentRole | None
+    location: Optional[str] = None
     is_active: bool
     manager_id: Optional[int] = None
 

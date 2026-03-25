@@ -73,6 +73,7 @@ class User(Base, TimestampMixin):
     last_name = Column(String(100), nullable=False)
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    location = Column(String, nullable=True)
     
     # --- NEW: Split Role and Department ---
     role = Column(
