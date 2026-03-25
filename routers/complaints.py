@@ -218,7 +218,7 @@ async def submit_complaint(
             if manager:
                 background_tasks.add_task(
                     send_push_notification_task, user_id=manager.id,
-                    title="Worker Auto-Assigned 📋", body=f"{assigned_worker.first_name} was auto-assigned to a new {analysis.nlp_category.value} issue."
+                    title="Worker Auto-Assigned 📋", body=f"{assigned_worker.first_name} was auto-assigned to a new {analysis.nlp_category} issue."
                 )
                 background_tasks.add_task(
                     send_professional_alert_email, to_email=manager.email, alert_type="TEAM TASK ASSIGNED",
