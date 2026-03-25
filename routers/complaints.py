@@ -203,11 +203,11 @@ async def submit_complaint(
     if assigned_worker:
         background_tasks.add_task(
             send_push_notification_task, user_id=assigned_worker.id,
-            title="New Task Auto-Assigned 🚨", body=f"A new {analysis.nlp_category.value} issue at {location}."
+            title="New Task Auto-Assigned 🚨", body=f"A new {analysis.nlp_category} issue at {location}."
         )
         background_tasks.add_task(
             send_professional_alert_email, to_email=assigned_worker.email, alert_type="NEW TASK ASSIGNED",
-            complaint_id=new_complaint.id, category=analysis.nlp_category.value, location=location, description=description
+            complaint_id=new_complaint.id, category=analysis.nlp_category, location=location, description=description
         )
         
         if assigned_worker.manager_id:
@@ -222,7 +222,7 @@ async def submit_complaint(
                 )
                 background_tasks.add_task(
                     send_professional_alert_email, to_email=manager.email, alert_type="TEAM TASK ASSIGNED",
-                    complaint_id=new_complaint.id, category=analysis.nlp_category.value, location=location, description=description
+                    complaint_id=new_complaint.id, category=analysis.nlp_category, location=location, description=description
                 )
 
     return {
