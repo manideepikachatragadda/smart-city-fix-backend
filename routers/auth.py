@@ -36,6 +36,7 @@ class CreateUserRequest(BaseModel):
     password: str
     role: UserRole 
     department: Optional[DepartmentRole] = None
+    location: Optional[str] = None
 
 class Token(BaseModel):
     access_token: str
@@ -121,6 +122,7 @@ async def create_user(db: db_dependency, request: CreateUserRequest):
         hashed_password=bcrypt_context.hash(request.password),
         role=request.role, 
         department=request.department,
+        location=request.location,
         is_active=True
     )
     db.add(new_user)
