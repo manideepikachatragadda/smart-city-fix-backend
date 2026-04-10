@@ -20,7 +20,7 @@ from database import get_db, SessionLocal
 from routers.auth import get_current_user
 from utils.workflow import process_complaint_ai, calculate_sla_deadline
 # Updated imports for the new professional templates
-from utils.email_service import send_citizen_receipt_email, send_professional_alert_email, send_resolution_email
+from utils.email_service import send_citizen_receipt_email, send_professional_alert_email, send_resolution_email, send_feedback_notification_email
 from utils.notifications import send_push_notification_task
 from config import settings
 
@@ -579,6 +579,7 @@ async def review_complaint(
 @router.post("/{complaint_id}/feedback", status_code=status.HTTP_201_CREATED)
 async def submit_customer_review(
     db: db_dependency,
+    background_tasks: BackgroundTasks,
     request: FeedbackRequest,
     complaint_id: int = Path(gt=0)
 ):
@@ -605,5 +606,54 @@ async def submit_customer_review(
     
     db.add(new_feedback)
     await db.commit()
+
+    # --- Notify Worker and Manager about the feedback ---
+    assigned_worker_id = complaint.assigned_user_id
+    if assigned_worker_id:
+        stmt_worker = select(User).filter(User.id == assigned_worker_id)
+        result_worker = await db.execute(stmt_worker)
+        worker = result_worker.scalar_one_or_none()
+
+        if worker:
+            background_tasks.add_task(
+                send_push_notification_task,
+                user_id=worker.id,
+                title="New Feedback Received ⭐",
+                body=f"You received a {request.rating}-star review for Ticket #{complaint_id} at {complaint.location}."
+            )
+            if worker.email:
+                background_tasks.add_task(
+                    send_feedback_notification_email,
+                    to_email=worker.email,
+                    complaint_id=complaint.id,
+                    category=complaint.department_assigned.value,
+                    location=complaint.location,
+                    rating=request.rating,
+                    comments=request.comments
+                )
+            
+            if worker.manager_id:
+                stmt_manager = select(User).filter(User.id == worker.manager_id)
+                result_manager = await db.execute(stmt_manager)
+                manager = result_manager.scalar_one_or_none()
+                
+                if manager:
+                    background_tasks.add_task(
+                        send_push_notification_task,
+                        user_id=manager.id,
+                        title="New Team Feedback ⭐",
+                        body=f"A {request.rating}-star review was submitted for {worker.first_name}'s Ticket #{complaint_id}."
+                    )
+                    
+                    if manager.email:
+                        background_tasks.add_task(
+                            send_feedback_notification_email,
+                            to_email=manager.email,
+                            complaint_id=complaint.id,
+                            category=complaint.department_assigned.value,
+                            location=complaint.location,
+                            rating=request.rating,
+                            comments=request.comments
+                        )
 
     return {"message": "Thank you! Your review has been submitted successfully."}

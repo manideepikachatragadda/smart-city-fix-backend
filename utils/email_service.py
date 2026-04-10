@@ -300,6 +300,66 @@ async def send_otp_email(to_email: str, user_name: str, otp_code: str):
     await send_email_async(to_email, subject, html_body, plain_body)
 
 
+# --- PROFESSIONAL FEEDBACK ALERTS ---
+def get_feedback_alert_html(complaint_id: int, category: str, location: str, rating: int, comments: str) -> str:
+    """Returns a styled HTML string for Feedback Alerts."""
+    header_color = "#3b82f6"
+    icon = "⭐"
+    
+    comments_html = f"<p style='color: #475569; font-size: 15px; background-color: #f1f5f9; padding: 15px; border-radius: 6px; margin-top: 0;'>{comments}</p>" if comments else ""
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 40px 0;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+                <td align="center">
+                    <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); overflow: hidden;">
+                        <tr>
+                            <td style="background-color: {header_color}; padding: 20px; text-align: center;">
+                                <h2 style="color: #ffffff; margin: 0; font-size: 20px; letter-spacing: 1px;">{icon} NEW FEEDBACK RECEIVED</h2>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 30px 40px;">
+                                <p style="color: #4b5563; font-size: 16px; margin-top: 0;">A user has submitted feedback for a closed ticket:</p>
+                                
+                                <div style="background-color: #f8fafc; border-left: 4px solid {header_color}; padding: 20px; margin: 20px 0; border-radius: 0 8px 8px 0;">
+                                    <table width="100%" style="color: #334155; font-size: 15px; line-height: 1.8;">
+                                        <tr><td width="30%"><strong>Ticket ID:</strong></td><td>#{complaint_id}</td></tr>
+                                        <tr><td><strong>Category:</strong></td><td style="text-transform: capitalize;">{category}</td></tr>
+                                        <tr><td valign="top"><strong>Location:</strong></td><td>{location}</td></tr>
+                                        <tr><td><strong>Rating:</strong></td><td>{rating}/5 ⭐</td></tr>
+                                    </table>
+                                </div>
+                                
+                                <h4 style="color: #1e293b; margin-bottom: 10px;">User Comments:</h4>
+                                {comments_html}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="background-color: #f9fafb; padding: 15px; text-align: center; border-top: 1px solid #e5e7eb;">
+                                <p style="color: #9ca3af; font-size: 12px; margin: 0;">SmartCity Fix Internal System</p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+async def send_feedback_notification_email(to_email: str, complaint_id: int, category: str, location: str, rating: int, comments: str):
+    """Assembles and sends the feedback notification email to worker/manager."""
+    subject = f"[FEEDBACK] Ticket #{complaint_id} - {category.upper()} ({rating}/5 Stars)"
+    html_body = get_feedback_alert_html(complaint_id, category, location, rating, comments)
+    plain_body = f"NEW FEEDBACK RECEIVED\nTicket #{complaint_id}\nCategory: {category}\nLocation: {location}\nRating: {rating}/5\nComments: {comments or 'None'}"
+    
+    await send_email_async(to_email, subject, html_body, plain_body)
+
+
 # --- CITIZEN RESOLUTION & REVIEW EMAIL ---
 def get_resolution_email_html(citizen_name: str, complaint_id: int, category: str, location: str, original_image: str, resolved_image: str, feedback_link: str) -> str:
     """Returns a styled HTML string for notifying the citizen that their issue is closed."""

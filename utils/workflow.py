@@ -8,7 +8,7 @@ from config import settings
 client = AsyncOpenAI(base_url=settings.OPENAI_BASE_URL, api_key=settings.OPENAI_API_KEY)
 
 class ComplaintAnalysis(BaseModel):
-    nlp_category: Literal["water", "electricity", "sanitation", "infrastructure","police","medical" "others"]
+    nlp_category: Literal["water", "electricity", "sanitation", "infrastructure", "police", "fire", "others"]
     priority_level: Literal["high", "medium", "low"]
     priority_score: int = Field(ge=1, le=10)
     sla_hours: int = Field(description="Estimated hours to resolve this issue.")
