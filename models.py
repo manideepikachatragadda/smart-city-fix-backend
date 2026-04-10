@@ -29,7 +29,7 @@ class DepartmentRole(str, enum.Enum):
     SANITATION = "sanitation"
     INFRASTRUCTURE = "infrastructure"
     POLICE="police"
-    MEDICAL="medical"
+    FIRE="fire"
     OTHERS = "others"
 
 class PriorityLevel(str, enum.Enum):
